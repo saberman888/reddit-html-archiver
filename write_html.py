@@ -6,6 +6,7 @@ import os
 import re
 import snudown
 import psutil
+import urllib3
 
 url_project = 'https://github.com/libertysoft3/reddit-html-archiver'
 links_per_page = 30
@@ -32,6 +33,9 @@ sort_indexes = {
     }
 }
 missing_comment_score_label = 'n/a'
+# Keep a dictionary of image locations so we can reuse them when making the index
+# They are stored by id
+idir = {}
 
 template_index = ''
 with open('templates/index.html', 'r', encoding='utf-8') as file:
@@ -95,6 +99,20 @@ with open('templates/partial_url.html', 'r', encoding='utf-8') as file:
 
 process = psutil.Process(os.getpid())
 
+def retrieve_media(URL):
+    http = urllib3.PoolManager()
+    data = http.request('GET', URL)
+
+    if data.status != 200: return None
+
+    idata = data.data
+    ct = data.headers['Content-Type']
+    ct_type = ct.split("/")[0]
+    if ct_type != "image":
+        return None
+    extension = ct.split("/")[1]
+    return (extension, idata)
+
 def generate_html(min_score=0, min_comments=0, hide_deleted_comments=False):
     delta = timedelta(days=1)
     subs = get_subs()
@@ -106,6 +124,7 @@ def generate_html(min_score=0, min_comments=0, hide_deleted_comments=False):
     for sub in subs:
         # write link pages
         # print('generate_html() processing %s %s kb' % (sub, int(int(process.memory_info().rss) / 1024)))
+        if sub != args.sub and args.sub != "-": continue
         stat_sub_links = 0
         stat_sub_filtered_links = 0
         stat_sub_comments = 0
@@ -266,6 +285,13 @@ def write_link_page(subreddits, link, subreddit='', hide_deleted_comments=False)
     for i in range(len(link['id']) + 2):
         static_include_path += '../'
 
+    if not args.noimages:
+        image = retrieve_media(link["url"])
+        # If the image is not None, replace the URL with the directory url
+        if image is not None: link['url'] = subreddit + "/images/" + link['id'] + "." + image[0]
+    else:
+        image = None
+        
     # render comments
     comments_html = ''
     for c in sorted_comments:
@@ -310,7 +336,11 @@ def write_link_page(subreddits, link, subreddit='', hide_deleted_comments=False)
     url = static_include_path + 'user/' + link['author'] + '.html'
     author_link_html = template_user_url.replace('###URL_AUTHOR###', url).replace('###AUTHOR###', link['author'])
 
-    html_title = template_url.replace('#HREF#', link['url']).replace('#INNER_HTML#', link['title'])
+    #html_title = template_url.replace('#HREF#', link['url']).replace('#INNER_HTML#', link['title'])
+    if image is None:
+        html_title = template_url.replace('#HREF#', link['url']).replace('#INNER_HTML#', link['title'])
+    else:
+        html_title = template_url.replace('#HREF#', static_include_path + link['url']).replace('#INNER_HTML#', link['title'])
     if link['is_self'] is True or link['is_self'].lower() == 'true':
         html_title = link['title']
 
@@ -351,7 +381,14 @@ def write_link_page(subreddits, link, subreddit='', hide_deleted_comments=False)
         with open(filepath, 'w', encoding='utf-8') as file:
             file.write(html)
         # print('wrote %s %s' % (created.strftime('%Y-%m-%d'), filepath))
-
+        
+    if image is not None:
+        if not os.path.isfile(link['url']):
+            os.makedirs("r/" + subreddit + "/images/", exist_ok=True)
+            open("r/" + link['url'], 'wb').write(image[1])
+            print("Writing media: %s " % link['url'])
+        # Add a '../' because we will reuse the file location for the index file
+        link['url'] = "../" + link['url']
     return True
 
 def write_subreddit_search_page(subreddit, subs, link_index, stat_sub_filtered_links, stat_sub_comments):
@@ -762,6 +799,8 @@ if __name__ == '__main__':
     parser.add_argument('--min-score', default=0, help='limit post rendering, default 0')
     parser.add_argument('--min-comments', default=0, help='limit post rendering, default 0')
     parser.add_argument('--hide-deleted-comments', action='store_true', help='exclude deleted and removed comments where possible')
+    parser.add_argument('--noimages', help='Disable retrieving of images', action='store_true')
+    parser.add_argument('--sub', default='-', help='Only write a specific subreddit', type=str)
     args=parser.parse_args()
 
     hide_deleted_comments = False
