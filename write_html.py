@@ -6,7 +6,7 @@ import os
 import re
 import snudown
 import psutil
-import urllib3
+import urllib3, configparser, json
 
 url_project = 'https://github.com/libertysoft3/reddit-html-archiver'
 links_per_page = 30
@@ -36,6 +36,8 @@ missing_comment_score_label = 'n/a'
 # Keep a dictionary of image locations so we can reuse them when making the index
 # They are stored by id
 idir = {}
+imgur_enabled = False
+cid = None
 
 template_index = ''
 with open('templates/index.html', 'r', encoding='utf-8') as file:
@@ -113,6 +115,24 @@ def retrieve_media(URL):
     extension = ct.split("/")[1]
     return (extension, idata)
 
+def get_imgur_credentials():
+    if os.path.isfile("credentials.ini"):
+        cfg = configparser.ConfigParser()
+        cfg.read("credentials.ini")
+        return str(cfg["MAIN"]['imgur_client_id'])
+    else:
+        return None
+
+def is_imgur(URL):
+    return (("https://imgur.com/" in URL),("https://imgur.com/a/" in URL))
+
+def get_imgur_image_link(iURL):
+    http = urllib3.PoolManager()
+    URL = "https://api.imgur.com/3/image/" + iURL.split('/')[-1]
+    data = http.request('GET', iURL, headers = {"Authorization" : str(" Client-ID " + cid)})
+    return json.loads(((data.data.decode('utf-8'))['data'])['link'])
+    
+
 def generate_html(min_score=0, min_comments=0, hide_deleted_comments=False):
     delta = timedelta(days=1)
     subs = get_subs()
@@ -120,6 +140,13 @@ def generate_html(min_score=0, min_comments=0, hide_deleted_comments=False):
     processed_subs = []
     stat_links = 0
     stat_filtered_links = 0
+    
+    # Before iterating through each sub, get the credentials for imgur and whatnot
+    cid = get_imgur_credentials()
+    if cid is str and not None: 
+        imgur_enabled = True
+    else:
+        print("Failed to load imgur credential")
 
     for sub in subs:
         # write link pages
@@ -286,7 +313,15 @@ def write_link_page(subreddits, link, subreddit='', hide_deleted_comments=False)
         static_include_path += '../'
 
     if not args.noimages:
-        image = retrieve_media(link["url"])
+        i = is_imgur(link['url'])
+        if imgur_enabled and i[0]:
+            if i[1]:
+                # TODO: Implement imgur album support
+                pass
+            elif i[0]:
+                images = retrieve_media(get_imgur_image_link(URL))
+        else:
+            image = retrieve_media(link["url"])
         # If the image is not None, replace the URL with the directory url
         if image is not None: link['url'] = subreddit + "/images/" + link['id'] + "." + image[0]
     else:
