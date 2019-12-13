@@ -143,6 +143,9 @@ def get_imgur_image_link(iURL):
     
     header = {"Authorization": str("CLIENT-ID " + cid)}
     r = requests.get(URL, headers=header)
+    if r.status_code != 200:
+        print("Error, %s on retrieving %s" % (r.status_code, URL))
+        return None
     
     j = json.loads(r.text)['data']
     if 'error' in j:
