@@ -6,7 +6,7 @@ import os
 import re
 import snudown
 import psutil
-import urllib3, configparser, json
+import configparser, json, requests
 
 url_project = 'https://github.com/libertysoft3/reddit-html-archiver'
 links_per_page = 30
@@ -33,11 +33,7 @@ sort_indexes = {
     }
 }
 missing_comment_score_label = 'n/a'
-# Keep a dictionary of image locations so we can reuse them when making the index
-# They are stored by id
-idir = {}
-imgur_enabled = False
-cid = None
+
 
 template_index = ''
 with open('templates/index.html', 'r', encoding='utf-8') as file:
@@ -102,18 +98,27 @@ with open('templates/partial_url.html', 'r', encoding='utf-8') as file:
 process = psutil.Process(os.getpid())
 
 def retrieve_media(URL):
-    http = urllib3.PoolManager()
-    data = http.request('GET', URL)
-
-    if data.status != 200: return None
-
-    idata = data.data
-    ct = data.headers['Content-Type']
-    ct_type = ct.split("/")[0]
-    if ct_type != "image":
+    try:
+        http = requests.get(URL)
+    except requests.exceptions.RequestException as e:
+        print("Error failed to retrieve %s" % URL)
+        print(e)
         return None
-    extension = ct.split("/")[1]
-    return (extension, idata)
+    
+    if http.status_code != 200: return None
+
+    if 'Content-Type' not in http.headers:
+        print("Error, \'Content-Type\' is not present in headers in URL of %s." % URL)
+        return None
+    
+    headers = http.headers['Content-Type']
+    
+    content_type = headers.split("/")[0]
+    if content_type != "image":
+        return None
+    
+    extension = headers.split("/")[1]
+    return (extension, http.content)
 
 def get_imgur_credentials():
     if os.path.isfile("credentials.ini"):
@@ -123,14 +128,27 @@ def get_imgur_credentials():
     else:
         return None
 
+# Returns a pair of bools that determine whether or not the imgur link is an individual image or an album
 def is_imgur(URL):
     return (("https://imgur.com/" in URL),("https://imgur.com/a/" in URL))
 
+# Using the client id given in credentials.ini, retrieve the URL from the json of the imgur image provided
 def get_imgur_image_link(iURL):
-    http = urllib3.PoolManager()
+    cid = get_imgur_credentials()
+    if cid is None:
+        print("Warning: failed to retrieve imgur image link from %s" % iURL)
+        print("Reason: No client id found")
+        return None
     URL = "https://api.imgur.com/3/image/" + iURL.split('/')[-1]
-    data = http.request('GET', iURL, headers = {"Authorization" : str(" Client-ID " + cid)})
-    return json.loads(((data.data.decode('utf-8'))['data'])['link'])
+    
+    header = {"Authorization": str("CLIENT-ID " + cid)}
+    r = requests.get(URL, headers=header)
+    
+    j = json.loads(r.text)['data']
+    if 'error' in j:
+        print(j['error'])
+        return None
+    return json.loads(r.text)['data']['link']
     
 
 def generate_html(min_score=0, min_comments=0, hide_deleted_comments=False):
@@ -140,13 +158,6 @@ def generate_html(min_score=0, min_comments=0, hide_deleted_comments=False):
     processed_subs = []
     stat_links = 0
     stat_filtered_links = 0
-    
-    # Before iterating through each sub, get the credentials for imgur and whatnot
-    cid = get_imgur_credentials()
-    if cid is str and not None: 
-        imgur_enabled = True
-    else:
-        print("Failed to load imgur credential")
 
     for sub in subs:
         # write link pages
@@ -312,20 +323,24 @@ def write_link_page(subreddits, link, subreddit='', hide_deleted_comments=False)
     for i in range(len(link['id']) + 2):
         static_include_path += '../'
 
+    image = None
     if not args.noimages:
         i = is_imgur(link['url'])
-        if imgur_enabled and i[0]:
-            if i[1]:
-                # TODO: Implement imgur album support
-                pass
-            elif i[0]:
-                images = retrieve_media(get_imgur_image_link(URL))
+        # if we have an imgur client id and the url in the loop is an imgur link then get the URL
+        if i[0]:
+            # Extract url from json and download the image itself
+            imu = get_imgur_image_link(link['url']) 
+            if imu is not None:
+                image = retrieve_media(imu)
+        elif i[1]:
+            # TODO: Implement Imgur albums support 
+            pass
         else:
-            image = retrieve_media(link["url"])
-        # If the image is not None, replace the URL with the directory url
+            image = retrieve_media(link['url'])
+        # Finally, if the image is downloaded then generate a path and attach it to the url entry in the link dict
+        # so when it's used as an href link it will point to the path instead of the url itself
+        # URL + /images/ + ID + . Image Extension
         if image is not None: link['url'] = subreddit + "/images/" + link['id'] + "." + image[0]
-    else:
-        image = None
         
     # render comments
     comments_html = ''
