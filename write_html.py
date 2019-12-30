@@ -7,6 +7,7 @@ import re
 import snudown
 import psutil
 import configparser, json, requests
+import pdb, sys, traceback
 
 url_project = 'https://github.com/libertysoft3/reddit-html-archiver'
 links_per_page = 30
@@ -96,6 +97,7 @@ with open('templates/partial_url.html', 'r', encoding='utf-8') as file:
     template_url = file.read()
 
 process = psutil.Process(os.getpid())
+isubs = []
 
 def retrieve_media(URL):
     try:
@@ -165,7 +167,6 @@ def generate_html(min_score=0, min_comments=0, hide_deleted_comments=False):
     for sub in subs:
         # write link pages
         # print('generate_html() processing %s %s kb' % (sub, int(int(process.memory_info().rss) / 1024)))
-        if sub != args.sub and args.sub != "-": continue
         stat_sub_links = 0
         stat_sub_filtered_links = 0
         stat_sub_comments = 0
@@ -575,14 +576,14 @@ def write_user_page(subs, user_index):
     return True
 
 def write_index(subs):
-    if len(subs) == 0:
+    if len(isubs) == 0:
         return False
-    subs.sort(key=lambda k: k['name'].casefold())
+    isubs.sort(key=lambda k: k['name'].casefold())
     
     stat_num_links = 0
     links_html = ''
     subs_menu_html = ''
-    for sub in subs:
+    for sub in isubs:
         sub_url = sub['name'] + '/index.html'
         links_html += template_index_sub.replace('#URL_SUB#', sub_url).replace('#SUB#', sub['name']).replace('#NUM_LINKS#', str(sub['num_links']))
         subs_menu_html += template_sub_link.replace('###URL_SUB###', sub_url).replace('###SUB###', sub['name'])
@@ -621,16 +622,24 @@ def sort_comments(comments, hide_deleted_comments=False):
     link_id = comments[0]['link_id']
     depth = 0
 
-    for c in comments:
-        c['depth'] = depth
-        id_map[c['id']] = c
-        parent_map[c['id']] = c['parent_id']
-        # add stickied comments
-        if c['stickied'].lower() == 'true':
-            sorted_comments.append(c)
-        # store top level comments      
-        elif c['parent_id'] == c['link_id']:
-            top_level_comments.append(c)
+    try:
+        for c in comments:
+            c['depth'] = depth
+            id_map[c['id']] = c
+            parent_map[c['id']] = c['parent_id']
+            # add stickied comments
+            if c['stickied'].lower() == 'true':
+                sorted_comments.append(c)
+            # store top level comments      
+            elif c['parent_id'] == c['link_id']:
+                top_level_comments.append(c)
+    except Exception as e:
+       
+        with open("comment_error.txt", 'w') as k:
+            k.write(str(e))
+            k.write("\n")
+            k.write(json.dumps(c))
+        sys.exit(1)
 
     # sort non stickied top level comments
     if len(top_level_comments) > 0:
@@ -708,6 +717,7 @@ def load_links(date, subreddit, with_comments=False):
     if os.path.isfile(daily_links_path):
         links = []
         with open(daily_links_path, 'r', encoding='utf-8') as links_file:
+            pdb.set_trace()
             reader = csv.DictReader(links_file)
             for link_row in reader:
                 if with_comments:
@@ -729,6 +739,11 @@ def get_subs():
         return subs
     for d in os.listdir('data'):
         if os.path.isdir('data' + '/' + d):
+            if d != args.sub and args.sub != "-": 
+                # Since we're not adding all subreddits to sub, we need
+                # to a list to append to so we can process the subreddits into the index file
+                isubs.append(d.lower())
+                continue
             subs.append(d.lower())
     return subs
 
