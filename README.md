@@ -34,7 +34,14 @@ data is fetched by subreddit and date range and is stored as csv files in `data`
     ./fetch_links.py -h
 
 decrease your date range or adjust `pushshift_rate_limit_per_minute` in `fetch_links.py` if you are getting connection errors.
+### Imgur
 
+If you want to also download Imgur images, you need to add a credentials.ini with your Imgur client id in it. 
+Example:
+
+    [MAIN]
+    imgur_client_id=ID_HERE
+    
 ### write web pages
 
 write html files for all subreddits to `r`.
