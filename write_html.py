@@ -718,7 +718,7 @@ def load_links(date, subreddit, with_comments=False):
     if os.path.isfile(daily_links_path):
         links = []
         with open(daily_links_path, 'r', encoding='utf-8') as links_file:
-            pdb.set_trace()
+            #pdb.set_trace()
             reader = csv.DictReader(links_file)
             for link_row in reader:
                 if with_comments:
