@@ -636,10 +636,11 @@ def sort_comments(comments, hide_deleted_comments=False):
     except Exception as e:
        
         with open("comment_error.txt", 'w') as k:
-            k.write(str(e))
-            k.write("\n")
-            k.write(json.dumps(c))
-        sys.exit(1)
+            #k.write(str(e))
+            #k.write("\n")
+            #k.write(json.dumps(c))
+            print("An error occured.")
+            sys.exit(1)
 
     # sort non stickied top level comments
     if len(top_level_comments) > 0:
