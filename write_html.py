@@ -18,7 +18,7 @@ end_date = datetime.today().date() + timedelta(days=1)
 source_data_links = 'links.csv'
 max_comment_depth = 8 # mostly for mobile, which might be silly
 removed_content_identifiers = ['[deleted]','deleted','[removed]','removed']
-default_sort = 'score'
+default_sort = 'created_utc'
 sort_indexes = {
     'score': {
         'default': 1,
@@ -97,30 +97,33 @@ with open('templates/partial_url.html', 'r', encoding='utf-8') as file:
     template_url = file.read()
 
 process = psutil.Process(os.getpid())
-isubs = []
-
 def retrieve_media(URL):
     try:
         http = requests.get(URL)
-    except requests.exceptions.RequestException as e:
+    except (requests.exceptions.RequestException, UnicodeError) as e:
         print("Error failed to retrieve %s" % URL)
         print(e)
         return None
     
     if http.status_code != 200: return None
+    try:
+        if 'Content-Type' not in http.headers:
+            print("Error, \'Content-Type\' is not present in headers in URL of %s." % URL)
+            return None
+        
+        headers = http.headers['Content-Type']
+        extension = headers.split("/")[1]
+        content_type = headers.split("/")[0]
+        if content_type != "image":
+            return None
 
-    if 'Content-Type' not in http.headers:
-        print("Error, \'Content-Type\' is not present in headers in URL of %s." % URL)
+        return (extension, http.content)
+    except IndexError as e:
+        print("Error, failed to retrieve %s" % URL)
+        print(e)
         return None
     
-    headers = http.headers['Content-Type']
-    
-    content_type = headers.split("/")[0]
-    if content_type != "image":
-        return None
-    
-    extension = headers.split("/")[1]
-    return (extension, http.content)
+
 
 def get_imgur_credentials():
     if os.path.isfile("credentials.ini"):
@@ -176,6 +179,7 @@ def generate_html(min_score=0, min_comments=0, hide_deleted_comments=False):
             stat_links += len(raw_links)
             stat_sub_links += len(raw_links)
             for l in raw_links:
+                print("Writing: %s" % d)
                 if validate_link(l, min_score, min_comments):
                     write_link_page(subs, l, sub, hide_deleted_comments)
                     stat_filtered_links += 1
@@ -576,14 +580,16 @@ def write_user_page(subs, user_index):
     return True
 
 def write_index(subs):
-    if len(isubs) == 0:
-        return False
-    isubs.sort(key=lambda k: k['name'].casefold())
+    """global isubs
+    
+    if len(isubs) == 0 or args.index == None:
+        isubs = [ k["sub"] for k,v in subs]"""
+    subs.sort(key=lambda k: k['name'].casefold())
     
     stat_num_links = 0
     links_html = ''
     subs_menu_html = ''
-    for sub in isubs:
+    for sub in subs:
         sub_url = sub['name'] + '/index.html'
         links_html += template_index_sub.replace('#URL_SUB#', sub_url).replace('#SUB#', sub['name']).replace('#NUM_LINKS#', str(sub['num_links']))
         subs_menu_html += template_sub_link.replace('###URL_SUB###', sub_url).replace('###SUB###', sub['name'])
@@ -718,7 +724,6 @@ def load_links(date, subreddit, with_comments=False):
     if os.path.isfile(daily_links_path):
         links = []
         with open(daily_links_path, 'r', encoding='utf-8') as links_file:
-            #pdb.set_trace()
             reader = csv.DictReader(links_file)
             for link_row in reader:
                 if with_comments:
@@ -743,7 +748,7 @@ def get_subs():
             if d != args.sub and args.sub != "-": 
                 # Since we're not adding all subreddits to sub, we need
                 # to a list to append to so we can process the subreddits into the index file
-                isubs.append(d.lower())
+                #isubs.append(d.lower())
                 continue
             subs.append(d.lower())
     return subs
@@ -870,6 +875,7 @@ if __name__ == '__main__':
     parser.add_argument('--hide-deleted-comments', action='store_true', help='exclude deleted and removed comments where possible')
     parser.add_argument('--noimages', help='Disable retrieving of images', action='store_true')
     parser.add_argument('--sub', default='-', help='Only write a specific subreddit', type=str)
+    #parser.add_argument('--index', default=None, help="Flag to write an index if --sub is specified")
     args=parser.parse_args()
 
     hide_deleted_comments = False
