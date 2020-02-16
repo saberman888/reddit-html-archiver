@@ -1,23 +1,38 @@
 #! /usr/bin/env python
 import time
 from time import mktime
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import argparse
 from pprint import pprint
 import json
 import csv
-import os
+import os, pickle
 from psaw import PushshiftAPI
+import signal
+import platform
 
 pushshift_rate_limit_per_minute = 20
 max_comments_per_query = 150
 write_every = 10
 
-link_fields = ['author', 'created_utc', 'domain', 'id', 'is_self', 
-    'num_comments', 'over_18', 'permalink', 'retrieved_on', 'score', 
+link_fields = ['author', 'created_utc', 'domain', 'id', 'is_self',
+    'num_comments', 'over_18', 'permalink', 'retrieved_on', 'score',
     'selftext', 'stickied', 'subreddit_id', 'title', 'url']
-comment_fields = ['author', 'body', 'created_utc', 'id', 'link_id', 
+comment_fields = ['author', 'body', 'created_utc', 'id', 'link_id',
     'parent_id', 'score', 'stickied', 'subreddit_id']
+
+subs_settings = {}
+subs = []
+
+def handler(signum, frame):
+    print('Interrupt was triggered, exiting...')
+    store_archive(args.archive)
+
+def store_archive(fn):
+    if isinstance(args.archive, str) and len(subs_settings) != 0:
+        with open(fn, 'w') as f:
+            f.write(json.dumps(subs_settings))
+        exit()
 
 def fetch_links(subreddit=None, date_start=None, date_stop=None, limit=None, score=None, self_only=False):
     if subreddit is None or date_start is None or date_stop is None:
@@ -107,6 +122,7 @@ def write_links(subreddit, links):
             # print('%s comments %s' % (r['id'], comments))
 
             created_ts = int(r['created_utc'])
+            subs_settings[subreddit] = created_ts
             created = datetime.utcfromtimestamp(created_ts).strftime('%Y-%m-%d')
             created_path = datetime.utcfromtimestamp(created_ts).strftime('%Y/%m/%d')
             if created != writing_day:
@@ -208,6 +224,8 @@ if __name__ == '__main__':
     parser.add_argument('--limit', default=None, help='pushshift api limit param, default None')
     parser.add_argument('--score', default=None, help='pushshift api score param, e.g. "> 10", default None')
     parser.add_argument('--self_only', action="store_true", help='only fetch selftext submissions, default False')
+    parser.add_argument('--slist', default=None, type=str, help='Input a text file containing a list of subreddits')
+    parser.add_argument('--archive', default=None, type=str, help='Keeps track of the subreddits on where you left off when you exited RHA')
     args=parser.parse_args()
 
     self_only = False
@@ -215,5 +233,31 @@ if __name__ == '__main__':
         self_only = True
 
     args.subreddit = args.subreddit.lower()
+    if isinstance(args.archive, str):
+        platos = platform.system()
+        if platos == "Linux" or platos == "Darwin":
+            signal.signal(signal.SIGSTP, handler)
+            signal.signal(signal.SIGSTOP, handler)
+        elif platos == "Windows":
+            signal.signal(signal.SIGINT, handler)
+        if os.path.isfile(args.archive):
+            # load file
+            with open(args.archive, 'r') as b:
+                i = json.load(b)
+                if args.subreddit in i:
+                    sd = datetime.fromtimestamp(i[args.subreddit]).strftime('%Y-%m-%d')
+                    print('%s: loaded from last post saved from %s' % (args.subreddit, sd))
+                    args.date_start = mkdate(sd)
+
+        else:
+            # new file and new entry
+            subs_settings[args.subreddit] = None
+
+    if isinstance(args.slist, str):
+        subs = open(args.slist, 'r').readlines()
+        for y in subs:
+            print("%s %s" % (y, "\n"))
 
     fetch_links(args.subreddit, args.date_start, args.date_stop, args.limit, args.score, self_only)
+
+    store_archive(args.archive)
