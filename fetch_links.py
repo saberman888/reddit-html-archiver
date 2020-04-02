@@ -217,6 +217,12 @@ def mkdate(datestr):
     raise argparse.ArgumentTypeError(datestr + ' is not a proper date string')
 
 if __name__ == '__main__':
+    platos = platform.system()
+    if platos == "Linux" or platos == "Darwin":
+        signal.signal(signal.SIGSTP, handler)
+        signal.signal(signal.SIGSTOP, handler)
+    elif platos == "Windows":
+        signal.signal(signal.SIGINT, handler)
     parser=argparse.ArgumentParser()
     parser.add_argument('subreddit', help='subreddit to archive')
     parser.add_argument('date_start', type=mkdate, help='start archiving at date, e.g. 2005-1-1')
@@ -233,31 +239,57 @@ if __name__ == '__main__':
         self_only = True
 
     args.subreddit = args.subreddit.lower()
-    if isinstance(args.archive, str):
-        platos = platform.system()
-        if platos == "Linux" or platos == "Darwin":
-            signal.signal(signal.SIGSTP, handler)
-            signal.signal(signal.SIGSTOP, handler)
-        elif platos == "Windows":
-            signal.signal(signal.SIGINT, handler)
-        if os.path.isfile(args.archive):
-            # load file
-            with open(args.archive, 'r') as b:
-                i = json.load(b)
-                if args.subreddit in i:
-                    sd = datetime.fromtimestamp(i[args.subreddit]).strftime('%Y-%m-%d')
-                    print('%s: loaded from last post saved from %s' % (args.subreddit, sd))
-                    args.date_start = mkdate(sd)
 
-        else:
-            # new file and new entry
-            subs_settings[args.subreddit] = None
-
+    # If either arguments are present, prepare them
     if isinstance(args.slist, str):
-        subs = open(args.slist, 'r').readlines()
-        for y in subs:
-            print("%s %s" % (y, "\n"))
+        with open(args.slist, 'r') as M:
+            l = M.readlines()
+            for line in l:
+                line = line.strip("\n") # Strip any newline characters if they are there
+                i = line.split(' ')
+                if len(i) < 2: 
+                    print('{} has no starting date, skipping.'.format(i[0]))
+                    continue
+                else:
+                    subs.append(i)
+        
+    elif isinstance(args.archive, str):
+        # Load file
+        if os.path.isfile(args.archive):
+            with open(args.archive, 'r') as b:
+                subs_settings = json.load(b)
+                print(subs_settings)
+                b.close()
+        else:
+            sub_settings[args.subreddit] = None
 
-    fetch_links(args.subreddit, args.date_start, args.date_stop, args.limit, args.score, self_only)
+
+                
+    if isinstance(args.slist, str):
+        for e in subs:
+            name = e[0]
+            sd = None
+            ed = None
+
+            if name in subs_settings and isinstance(args.archive, str):
+                n = subs_settings[name]
+                sd = datetime.fromtimestamp(n).strftime('%Y-%m-%d')
+            else:
+                sd = e[1]
+                
+            if len(e) > 2:
+                ed = datetime.fromtimestamp(e[2]).strftime('%Y-%m-%d')
+            else:
+                ed = datetime.today().strftime('%Y-%m-%d')
+            fetch_links(name, mkdate(sd), mkdate(ed), args.limit, args.score, args.self_only)
+
+    elif not isinstance(args.slist, str) and isinstance(args.archive, str):
+        sd = mkdate(subs_settings[args.subreddit])
+        if sd is None:
+            sd = args.date_start
+        fetch_links(args.subreddit, sd, args.date_stop, args.limit, args.score, args.self_only)
+
+    else:
+        fetch_links(args.subreddit, args.date_start, args.date_stop, args.limit, args.score, self_only)
 
     store_archive(args.archive)
