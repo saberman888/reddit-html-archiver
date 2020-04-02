@@ -32,7 +32,7 @@ def store_archive(fn):
     if isinstance(args.archive, str) and len(subs_settings) != 0:
         with open(fn, 'w') as f:
             f.write(json.dumps(subs_settings))
-        exit()
+        os._exit(0)
 
 def fetch_links(subreddit=None, date_start=None, date_stop=None, limit=None, score=None, self_only=False):
     if subreddit is None or date_start is None or date_stop is None:
